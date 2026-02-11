@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StockX",
-  description: "StockX - Your Stock Market Companion",
+  title: "Signalist",
+  description: "Signalist - Your Stock Market Companion",
 };
 
 export default function RootLayout({
