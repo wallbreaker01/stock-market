@@ -205,6 +205,12 @@
   .country-select-item {
     @apply text-white cursor-pointer px-3 py-2 rounded-sm bg-gray-800 hover:!bg-gray-600;
   }
+  .country-flag {
+    font-family: 'Segoe UI Emoji', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif;
+    font-size: 1.25rem;
+    line-height: 1;
+    display: inline-block;
+  }
   .footer-link {
     @apply text-gray-400 font-medium hover:text-yellow-400 hover:underline transition-colors;
   }
