@@ -7,9 +7,9 @@ import { redirect } from "next/navigation";
 
 
 const Layout = async ({ children }: { children: React.ReactNode }) => {
-  const session = await auth.api.getSession({headers: await headers()});
+  const session = await auth.api.getSession({ headers: await headers() });
 
-    if(session?.user) redirect('/');
+  if (session?.user) redirect('/');
 
   return (
     <main className="auth-layout">
@@ -29,7 +29,7 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
           <div className="flex items-center justify-between">
             <div>
               <cite className="auth-testimonial-author">- Sowmik Roy</cite>
-              <p className="max-md:text-xs text-gray-500">CEO, Signalist</p>
+              <p className="max-md:text-xs text-gray-500">CEO, TradingViewWidget</p>
             </div>
             <div className="flex items-center gap-0.5">
               {[1, 2, 3, 4, 5].map((star) => (
@@ -39,9 +39,7 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
           </div>
         </div>
         <div className="flex-1 relative">
-          <Image src="/assets/images/dashboard.png" alt="Dashboard Preview" width={1440} height={1150} className="auth-dashboard-preview absolute top-0" />
-          
-
+          <Image src="/assets/images/dashboard.png" alt="Dashboard Preview" width={1440} height={1150} className="auth-dashboard-preview" />
         </div>
       </section>
 

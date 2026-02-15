@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { Control, Controller, FieldError } from 'react-hook-form';
+import * as flags from 'country-flag-icons/react/3x2';
 import {
   Popover,
   PopoverContent,
@@ -30,25 +31,16 @@ type CountrySelectProps = {
   required?: boolean;
 };
 
-const CountrySelect = ({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) => {
+const CountrySelect = ({ value, onChange, }: { value: string; onChange: (value: string) => void; }) => {
   const [open, setOpen] = useState(false);
 
   // Get country options with flags
   const countries = countryList().getData();
 
-  // Helper function to get flag emoji
-  const getFlagEmoji = (countryCode: string) => {
-    const codePoints = countryCode
-      .toUpperCase()
-      .split('')
-      .map((char) => 127397 + char.charCodeAt(0));
-    return String.fromCodePoint(...codePoints);
+  // Helper function to get flag component
+  const getFlagComponent = (countryCode: string) => {
+    const FlagComponent = (flags as any)[countryCode.toUpperCase()];
+    return FlagComponent ? <FlagComponent className="w-5 h-4 rounded-sm" /> : <span className="w-5 h-4 bg-gray-700 rounded-sm inline-block" />;
   };
 
   return (
@@ -62,7 +54,7 @@ const CountrySelect = ({
         >
           {value ? (
             <span className='flex items-center gap-2'>
-              <span className='country-flag'>{getFlagEmoji(value)}</span>
+              {getFlagComponent(value)}
               <span>{countries.find((c) => c.value === value)?.label}</span>
             </span>
           ) : (
@@ -102,7 +94,7 @@ const CountrySelect = ({
                     )}
                   />
                   <span className='flex items-center gap-2'>
-                    <span className='country-flag'>{getFlagEmoji(country.value)}</span>
+                    {getFlagComponent(country.value)}
                     <span>{country.label}</span>
                   </span>
                 </CommandItem>
@@ -139,7 +131,7 @@ export const CountrySelectField = ({
       />
       {error && <p className='text-sm text-red-500'>{error.message}</p>}
       <p className='text-xs text-gray-500'>
-        Helps us show market data and news relevant to you.
+        Helps us to show market data and news relevant to you.
       </p>
     </div>
   );
