@@ -8,13 +8,10 @@ import {
     CommandItem,
     CommandList,
 } from '@/components/ui/command';
-import { Label } from 'radix-ui';
 import { Button } from './ui/button';
-import { Loader, Loader2, Star, TrendingUp } from 'lucide-react';
-import { isSea } from 'node:sea';
+import {  Loader2, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { searchStocks } from '@/lib/actions/finnhub.action';
-import { set } from 'mongoose';
 import { useDebounce } from '@/hooks/useDebounce';
 
 export default function SearchCommand({ renderAs = 'button', label = 'Add Stock', initialStocks }: SearchCommandProps) {
