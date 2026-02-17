@@ -3,6 +3,8 @@
 import { connectToDatabase } from '@/database/mongoose';
 import { Watchlist } from '@/database/models/watchlist.model';
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
+import { auth } from '@/lib/better-auth/auth';
 
 export async function getWatchlistSymbolsByEmail(email: string): Promise<string[]> {
     if (!email) return [];
@@ -29,11 +31,18 @@ export async function getWatchlistSymbolsByEmail(email: string): Promise<string[
 }
 
 export async function getWatchlistByUserId(userId: string): Promise<{ symbol: string; company: string }[]> {
-    if (!userId) return [];
-
     try {
+        // Get session and validate user is logged in
+        const session = await auth.api.getSession({ headers: await headers() });
+        if (!session?.user?.id) {
+            return [];
+        }
+
+        // Use session-derived userId, ignore the passed-in parameter
+        const authenticatedUserId = session.user.id;
+
         await connectToDatabase();
-        const items = await Watchlist.find({ userId }, { symbol: 1, company: 1 }).lean();
+        const items = await Watchlist.find({ userId: authenticatedUserId }, { symbol: 1, company: 1 }).lean();
         return items.map((i) => ({
             symbol: String(i.symbol),
             company: String(i.company),
@@ -45,20 +54,29 @@ export async function getWatchlistByUserId(userId: string): Promise<{ symbol: st
 }
 
 export async function addToWatchlist(userId: string, symbol: string, company: string) {
-    if (!userId || !symbol || !company) {
+    if (!symbol || !company) {
         return { success: false, message: 'Missing required fields' };
     }
 
     try {
+        // Get session and validate user is logged in
+        const session = await auth.api.getSession({ headers: await headers() });
+        if (!session?.user?.id) {
+            return { success: false, message: 'Unauthorized' };
+        }
+
+        // Use session-derived userId, ignore the passed-in parameter
+        const authenticatedUserId = session.user.id;
+
         await connectToDatabase();
 
-        const existing = await Watchlist.findOne({ userId, symbol: symbol.toUpperCase() });
+        const existing = await Watchlist.findOne({ userId: authenticatedUserId, symbol: symbol.toUpperCase() });
         if (existing) {
             return { success: false, message: 'Stock already in watchlist' };
         }
 
         await Watchlist.create({
-            userId,
+            userId: authenticatedUserId,
             symbol: symbol.toUpperCase(),
             company,
             addedAt: new Date(),
@@ -73,14 +91,23 @@ export async function addToWatchlist(userId: string, symbol: string, company: st
 }
 
 export async function removeFromWatchlist(userId: string, symbol: string) {
-    if (!userId || !symbol) {
+    if (!symbol) {
         return { success: false, message: 'Missing required fields' };
     }
 
     try {
+        // Get session and validate user is logged in
+        const session = await auth.api.getSession({ headers: await headers() });
+        if (!session?.user?.id) {
+            return { success: false, message: 'Unauthorized' };
+        }
+
+        // Use session-derived userId, ignore the passed-in parameter
+        const authenticatedUserId = session.user.id;
+
         await connectToDatabase();
 
-        const result = await Watchlist.deleteOne({ userId, symbol: symbol.toUpperCase() });
+        const result = await Watchlist.deleteOne({ userId: authenticatedUserId, symbol: symbol.toUpperCase() });
 
         if (result.deletedCount === 0) {
             return { success: false, message: 'Stock not found in watchlist' };

@@ -61,8 +61,8 @@ export const sendDailyNewsSummary = inngest.createFunction(
   { id: "daily-news-summary" },
   [
     { event: "app/send.daily.news" },
-    { cron: "0 12 * * *" /* every day at 12:00 PM*/ },
-    // { cron: "* * * * *" /* every min*/ },
+    // { cron: "0 12 * * *" /* every day at 12:00 PM*/ },
+    { cron: "* * * * *" /* every min*/ },
   ],
   async ({ step }) => {
     //1. get all users for news delivery
@@ -167,6 +167,7 @@ export const sendHourlyStockAlerts = inngest.createFunction(
     const results = await step.run("build-alert-summaries", async () => {
       const perUser: Array<{
         user: UserForNewsEmail;
+        symbols: string[];
         snapshots: Array<{
           symbol: string;
           price: number;
@@ -182,10 +183,10 @@ export const sendHourlyStockAlerts = inngest.createFunction(
         try {
           const symbols = group.alerts.map((a) => a.symbol);
           const snapshots = await getStockSnapshots(symbols);
-          perUser.push({ user: group.user, snapshots });
+          perUser.push({ user: group.user, symbols, snapshots });
         } catch (e) {
           console.error("hourly-alerts: snapshot error", group.user.email, e);
-          perUser.push({ user: group.user, snapshots: [] });
+          perUser.push({ user: group.user, symbols: group.alerts.map((a) => a.symbol), snapshots: [] });
         }
       }
 
@@ -202,10 +203,12 @@ export const sendHourlyStockAlerts = inngest.createFunction(
       timeZone: "UTC",
     });
 
-    await step.run("send-alert-emails", async () => {
-      await Promise.all(
-        results.map(async ({ user, snapshots }) => {
-          if (!snapshots || snapshots.length === 0) return false;
+    const emailResults = await step.run("send-alert-emails", async () => {
+      return await Promise.all(
+        results.map(async ({ user, symbols, snapshots }) => {
+          if (!snapshots || snapshots.length === 0) {
+            return { userId: user.id, symbols, sent: false };
+          }
 
           const rows = snapshots
             .map((s) => {
@@ -239,22 +242,29 @@ export const sendHourlyStockAlerts = inngest.createFunction(
             </table>
           `;
 
-          return await sendAlertSummaryEmail({
-            email: user.email,
-            name: user.name,
-            date: dateLabel,
-            content,
-          });
+          try {
+            await sendAlertSummaryEmail({
+              email: user.email,
+              name: user.name,
+              date: dateLabel,
+              content,
+            });
+            return { userId: user.id, symbols, sent: true };
+          } catch (e) {
+            console.error("Failed to send alert email to:", user.email, e);
+            return { userId: user.id, symbols, sent: false };
+          }
         })
       );
     });
 
     await step.run("mark-alerts-sent", async () => {
       await Promise.all(
-        groups.map(async (group) => {
-          const symbols = group.alerts.map((a) => a.symbol);
-          await markAlertsSent(group.user.id, symbols);
-        })
+        emailResults
+          .filter((result) => result.sent === true)
+          .map(async (result) => {
+            await markAlertsSent(result.userId, result.symbols);
+          })
       );
     });
 
