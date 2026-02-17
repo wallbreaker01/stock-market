@@ -6,6 +6,14 @@ import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/better-auth/auth';
 
+/**
+ * Retrieve all watchlist symbols for the user with the given email.
+ *
+ * Returns an array of symbol strings from the user's watchlist; returns an empty array when the `email` is falsy, no matching user is found, the user has no id, or an error occurs.
+ *
+ * @param email - The email address of the user whose watchlist symbols should be returned
+ * @returns An array of watchlist symbol strings belonging to the specified user
+ */
 export async function getWatchlistSymbolsByEmail(email: string): Promise<string[]> {
     if (!email) return [];
 
@@ -30,6 +38,12 @@ export async function getWatchlistSymbolsByEmail(email: string): Promise<string[
     }
 }
 
+/**
+ * Retrieve the authenticated user's watchlist items (symbol and company).
+ *
+ * @param userId - Ignored: this function uses the currently authenticated user's id from session instead of this parameter.
+ * @returns An array of objects with `symbol` and `company` strings for each watchlist entry; returns an empty array if the caller is not authenticated or if an error occurs.
+ */
 export async function getWatchlistByUserId(userId: string): Promise<{ symbol: string; company: string }[]> {
     try {
         // Get session and validate user is logged in
@@ -53,6 +67,22 @@ export async function getWatchlistByUserId(userId: string): Promise<{ symbol: st
     }
 }
 
+/**
+ * Add a stock to the authenticated user's watchlist.
+ *
+ * The function ignores the supplied `userId` and uses the authenticated session's user id instead.
+ *
+ * @param userId - Ignored; the authenticated session's user id is used for the operation
+ * @param symbol - The stock ticker symbol to add (case-insensitive; stored uppercase)
+ * @param company - The company name associated with the symbol
+ * @returns An object with `success` and `message` describing the outcome.
+ *          Possible `message` values include:
+ *          - `'Missing required fields'` if `symbol` or `company` is empty
+ *          - `'Unauthorized'` if no authenticated session is found
+ *          - `'Stock already in watchlist'` if the symbol already exists for the user
+ *          - `'Added to watchlist'` when the symbol is successfully added
+ *          - `'Failed to add to watchlist'` for unexpected errors
+ */
 export async function addToWatchlist(userId: string, symbol: string, company: string) {
     if (!symbol || !company) {
         return { success: false, message: 'Missing required fields' };
@@ -90,6 +120,15 @@ export async function addToWatchlist(userId: string, symbol: string, company: st
     }
 }
 
+/**
+ * Remove a stock symbol from the authenticated user's watchlist.
+ *
+ * Attempts to delete the uppercase `symbol` entry for the currently authenticated user and triggers a revalidation of the `/watchlist` path on success.
+ *
+ * @param userId - Ignored; the function uses the authenticated user's id from the session instead of this parameter.
+ * @param symbol - The stock symbol to remove (case-insensitive; normalized to uppercase).
+ * @returns An object with `success` indicating whether the removal succeeded and `message` describing the outcome (`'Removed from watchlist'`, `'Missing required fields'`, `'Unauthorized'`, `'Stock not found in watchlist'`, or `'Failed to remove from watchlist'`).
+ */
 export async function removeFromWatchlist(userId: string, symbol: string) {
     if (!symbol) {
         return { success: false, message: 'Missing required fields' };
