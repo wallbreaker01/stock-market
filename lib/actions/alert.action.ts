@@ -5,7 +5,9 @@ import { Alert } from '@/database/models/alert.model';
 import { revalidatePath } from 'next/cache';
 
 export async function addAlert(userId: string, symbol: string, company: string) {
-  console.log('🔔 addAlert called with:', { userId, symbol, company });
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔔 addAlert called with:', { userId, symbol });
+  }
   
   if (!userId || !symbol || !company) {
     return { success: false, message: 'Missing required fields' };
@@ -28,8 +30,9 @@ export async function addAlert(userId: string, symbol: string, company: string) 
       createdAt: new Date(),
       lastSentAt: null,
     });
-    console.log('✅ Alert created successfully:', newAlert);
-
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('✅ Alert created successfully:', newAlert?._id);
+    }
     revalidatePath('/watchlist');
     return { success: true, message: 'Hourly alert enabled' };
   } catch (err) {
