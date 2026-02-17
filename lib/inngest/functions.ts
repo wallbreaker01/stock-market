@@ -3,10 +3,11 @@ import {
   NEWS_SUMMARY_EMAIL_PROMPT,
   PERSONALIZED_WELCOME_EMAIL_PROMPT,
 } from "./prompts";
-import { sendNewsSummaryEmail, sendWelcomeEmail } from "../nodemailer";
-import { getNews } from "@/lib/actions/finnhub.action";
-import { getFormattedTodayDate } from "@/lib/utils";
+import { sendAlertSummaryEmail, sendNewsSummaryEmail, sendWelcomeEmail } from "../nodemailer";
+import { getNews, getStockSnapshots } from "@/lib/actions/finnhub.action";
+import { formatPrice, getFormattedTodayDate } from "@/lib/utils";
 import { getWatchlistSymbolsByEmail } from "../actions/watchlist.action";
+import { getAlertsForEmail, markAlertsSent } from "../actions/alert.action";
 import { getAllUsersForNewsEmail } from "@/lib/actions/user.action";
 
 export const sendSignUpEmail = inngest.createFunction(
@@ -146,4 +147,117 @@ export const sendDailyNewsSummary = inngest.createFunction(
       message: "Daily news summary emails sent successfully",
     };
   },
+);
+
+export const sendHourlyStockAlerts = inngest.createFunction(
+  { id: "hourly-stock-alerts" },
+  [
+    { event: "app/send.hourly.alerts" },
+    { cron: "0 * * * *" /* every hour */ },
+  ],
+  async ({ step }) => {
+    console.log('🚀 sendHourlyStockAlerts function triggered');
+    const groups = await step.run("get-alert-groups", getAlertsForEmail);
+    console.log('📊 Alert groups received:', groups?.length || 0);
+    if (!groups || groups.length === 0) {
+      console.log('⚠️ No alert groups found, exiting');
+      return { success: false, message: "No alerts found" };
+    }
+
+    const results = await step.run("build-alert-summaries", async () => {
+      const perUser: Array<{
+        user: UserForNewsEmail;
+        snapshots: Array<{
+          symbol: string;
+          price: number;
+          changePercent: number;
+          high: number;
+          low: number;
+          open: number;
+          previousClose: number;
+        }>;
+      }> = [];
+
+      for (const group of groups) {
+        try {
+          const symbols = group.alerts.map((a) => a.symbol);
+          const snapshots = await getStockSnapshots(symbols);
+          perUser.push({ user: group.user, snapshots });
+        } catch (e) {
+          console.error("hourly-alerts: snapshot error", group.user.email, e);
+          perUser.push({ user: group.user, snapshots: [] });
+        }
+      }
+
+      return perUser;
+    });
+
+    const dateLabel = new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "UTC",
+    });
+
+    await step.run("send-alert-emails", async () => {
+      await Promise.all(
+        results.map(async ({ user, snapshots }) => {
+          if (!snapshots || snapshots.length === 0) return false;
+
+          const rows = snapshots
+            .map((s) => {
+              const change = `${s.changePercent >= 0 ? "+" : ""}${s.changePercent.toFixed(2)}%`;
+              return `
+                <tr>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${s.symbol}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${formatPrice(s.price)}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${change}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${formatPrice(s.open)}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${formatPrice(s.high)}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${formatPrice(s.low)}</td>
+                  <td style="padding:8px 0; color:#CCDADC; font-size:14px;">${formatPrice(s.previousClose)}</td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          const content = `
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse;">
+              <tr>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Symbol</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Price</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Change</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Open</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">High</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Low</th>
+                <th align="left" style="padding:8px 0; color:#FDD458; font-size:12px; font-weight:600;">Prev Close</th>
+              </tr>
+              ${rows}
+            </table>
+          `;
+
+          return await sendAlertSummaryEmail({
+            email: user.email,
+            name: user.name,
+            date: dateLabel,
+            content,
+          });
+        })
+      );
+    });
+
+    await step.run("mark-alerts-sent", async () => {
+      await Promise.all(
+        groups.map(async (group) => {
+          const symbols = group.alerts.map((a) => a.symbol);
+          await markAlertsSent(group.user.id, symbols);
+        })
+      );
+    });
+
+    return { success: true, message: "Hourly stock alerts sent" };
+  }
 );

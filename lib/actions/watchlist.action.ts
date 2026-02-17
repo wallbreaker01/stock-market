@@ -2,6 +2,7 @@
 
 import { connectToDatabase } from '@/database/mongoose';
 import { Watchlist } from '@/database/models/watchlist.model';
+import { revalidatePath } from 'next/cache';
 
 export async function getWatchlistSymbolsByEmail(email: string): Promise<string[]> {
     if (!email) return [];
@@ -24,5 +25,71 @@ export async function getWatchlistSymbolsByEmail(email: string): Promise<string[
     } catch (err) {
         console.error('getWatchlistSymbolsByEmail error:', err);
         return [];
+    }
+}
+
+export async function getWatchlistByUserId(userId: string): Promise<{ symbol: string; company: string }[]> {
+    if (!userId) return [];
+
+    try {
+        await connectToDatabase();
+        const items = await Watchlist.find({ userId }, { symbol: 1, company: 1 }).lean();
+        return items.map((i) => ({
+            symbol: String(i.symbol),
+            company: String(i.company),
+        }));
+    } catch (err) {
+        console.error('getWatchlistByUserId error:', err);
+        return [];
+    }
+}
+
+export async function addToWatchlist(userId: string, symbol: string, company: string) {
+    if (!userId || !symbol || !company) {
+        return { success: false, message: 'Missing required fields' };
+    }
+
+    try {
+        await connectToDatabase();
+
+        const existing = await Watchlist.findOne({ userId, symbol: symbol.toUpperCase() });
+        if (existing) {
+            return { success: false, message: 'Stock already in watchlist' };
+        }
+
+        await Watchlist.create({
+            userId,
+            symbol: symbol.toUpperCase(),
+            company,
+            addedAt: new Date(),
+        });
+
+        revalidatePath('/watchlist');
+        return { success: true, message: 'Added to watchlist' };
+    } catch (err) {
+        console.error('addToWatchlist error:', err);
+        return { success: false, message: 'Failed to add to watchlist' };
+    }
+}
+
+export async function removeFromWatchlist(userId: string, symbol: string) {
+    if (!userId || !symbol) {
+        return { success: false, message: 'Missing required fields' };
+    }
+
+    try {
+        await connectToDatabase();
+
+        const result = await Watchlist.deleteOne({ userId, symbol: symbol.toUpperCase() });
+
+        if (result.deletedCount === 0) {
+            return { success: false, message: 'Stock not found in watchlist' };
+        }
+
+        revalidatePath('/watchlist');
+        return { success: true, message: 'Removed from watchlist' };
+    } catch (err) {
+        console.error('removeFromWatchlist error:', err);
+        return { success: false, message: 'Failed to remove from watchlist' };
     }
 }

@@ -1,8 +1,6 @@
 import  mongoose from 'mongoose';
 import { cache } from 'react';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
 declare global {
     var mongooseCache:{
         conn: typeof mongoose | null,
@@ -17,6 +15,8 @@ if (!cached) {
 }
 
 export const connectToDatabase = async () => {
+    const MONGODB_URI = process.env.MONGODB_URI;
+    
     if(!MONGODB_URI) throw new Error('Please define the MONGODB_URI environment variable');
 
     if(cached.conn) return cached.conn;
@@ -32,6 +32,6 @@ export const connectToDatabase = async () => {
         throw err;
     }
 
-    console.log(`Connected to MongoDB ${process.env.NODE_ENV} - ${MONGODB_URI}`);
+    console.log(`Connected to MongoDB ${process.env.NODE_ENV}`);
     return cached.conn;
 }

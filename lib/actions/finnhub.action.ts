@@ -7,17 +7,32 @@ import { cache } from 'react';
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 const NEXT_PUBLIC_FINNHUB_API_KEY = process.env.NEXT_PUBLIC_FINNHUB_API_KEY ?? '';
 
-async function fetchJSON<T>(url: string, revalidateSeconds?: number): Promise<T> {
+async function fetchJSON<T>(url: string, revalidateSeconds?: number, retries = 3): Promise<T> {
     const options: RequestInit & { next?: { revalidate?: number } } = revalidateSeconds
         ? { cache: 'force-cache', next: { revalidate: revalidateSeconds } }
         : { cache: 'no-store' };
 
-    const res = await fetch(url, options);
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Fetch failed ${res.status}: ${text}`);
+    for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            const res = await fetch(url, options);
+            if (!res.ok) {
+                // Handle rate limiting with exponential backoff
+                if (res.status === 429 && attempt < retries - 1) {
+                    const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                const text = await res.text().catch(() => '');
+                throw new Error(`Fetch failed ${res.status}: ${text}`);
+            }
+            return (await res.json()) as T;
+        } catch (error) {
+            if (attempt === retries - 1) throw error;
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
     }
-    return (await res.json()) as T;
+    throw new Error('Max retries reached');
 }
 
 export { fetchJSON };
@@ -98,6 +113,168 @@ export async function getNews(symbols?: string[]): Promise<MarketNewsArticle[]> 
     }
 }
 
+export async function getWatchlistData(symbols: string[]): Promise<StockWithData[]> {
+    try {
+        const token = process.env.FINNHUB_API_KEY ?? NEXT_PUBLIC_FINNHUB_API_KEY;
+        if (!token) {
+            console.error('FINNHUB API key is not configured');
+            return [];
+        }
+
+        if (!symbols || symbols.length === 0) return [];
+
+        // Process symbols in smaller batches to avoid rate limits
+        const batchSize = 5;
+        const stocksData: (StockWithData | null)[] = [];
+
+        for (let i = 0; i < symbols.length; i += batchSize) {
+            const batch = symbols.slice(i, i + batchSize);
+            
+            const batchResults = await Promise.all(
+                batch.map(async (symbol) => {
+                    try {
+                        // Use longer cache times to reduce API calls
+                        const [quoteRes, profileRes, financialsRes] = await Promise.all([
+                            fetchJSON<QuoteData>(`${FINNHUB_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&token=${token}`, 300).catch(() => ({ c: 0, dp: 0 })),
+                            fetchJSON<ProfileData>(`${FINNHUB_BASE_URL}/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${token}`, 7200).catch(() => ({ name: symbol, marketCapitalization: 0 })),
+                            fetchJSON<FinancialsData>(`${FINNHUB_BASE_URL}/stock/metric?symbol=${encodeURIComponent(symbol)}&metric=all&token=${token}`, 7200).catch(() => ({ metric: {} })),
+                        ]);
+
+                        const currentPrice = quoteRes.c || 0;
+                        const changePercent = quoteRes.dp || 0;
+                        const company = profileRes.name || symbol;
+                        const marketCapInMillions = profileRes.marketCapitalization || 0;
+                        const metrics: Record<string, number> = (financialsRes.metric as Record<string, number>) || {};
+                        const peRatio = metrics['peBasicExclExtraTTM'] || metrics['peNormalizedAnnual'] || 0;
+
+                        // Format market cap
+                        let marketCap = 'N/A';
+                        if (marketCapInMillions >= 1000) {
+                            marketCap = `$${(marketCapInMillions / 1000).toFixed(2)}T`;
+                        } else if (marketCapInMillions >= 1) {
+                            marketCap = `$${marketCapInMillions.toFixed(2)}B`;
+                        }
+
+                        const stockData: StockWithData = {
+                            userId: '',
+                            symbol,
+                            company,
+                            addedAt: new Date(),
+                            currentPrice,
+                            changePercent,
+                            priceFormatted: currentPrice ? `$${currentPrice.toFixed(2)}` : 'N/A',
+                            changeFormatted: `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`,
+                            marketCap,
+                            peRatio: peRatio ? peRatio.toFixed(1) : 'N/A',
+                        };
+
+                        return stockData;
+                    } catch (e) {
+                        console.error(`Error fetching data for ${symbol}:`, e);
+                        // Return basic stock info even if API fails
+                        return {
+                            userId: '',
+                            symbol,
+                            company: symbol,
+                            addedAt: new Date(),
+                            currentPrice: 0,
+                            changePercent: 0,
+                            priceFormatted: 'N/A',
+                            changeFormatted: 'N/A',
+                            marketCap: 'N/A',
+                            peRatio: 'N/A',
+                        };
+                    }
+                })
+            );
+
+            stocksData.push(...batchResults);
+            
+            // Add a small delay between batches to avoid rate limiting
+            if (i + batchSize < symbols.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
+        return stocksData.filter((stock): stock is StockWithData => stock !== null);
+    } catch (err) {
+        console.error('getWatchlistData error:', err);
+        return [];
+    }
+}
+
+type QuoteSnapshotData = QuoteData & {
+    h?: number;
+    l?: number;
+    o?: number;
+    pc?: number;
+};
+
+export type StockSnapshot = {
+    symbol: string;
+    price: number;
+    changePercent: number;
+    high: number;
+    low: number;
+    open: number;
+    previousClose: number;
+};
+
+export async function getStockSnapshots(symbols: string[]): Promise<StockSnapshot[]> {
+    try {
+        const token = process.env.FINNHUB_API_KEY ?? NEXT_PUBLIC_FINNHUB_API_KEY;
+        if (!token) {
+            console.error('FINNHUB API key is not configured');
+            return [];
+        }
+
+        if (!symbols || symbols.length === 0) return [];
+
+        const batchSize = 8;
+        const snapshots: StockSnapshot[] = [];
+
+        for (let i = 0; i < symbols.length; i += batchSize) {
+            const batch = symbols.slice(i, i + batchSize);
+            const batchResults = await Promise.all(
+                batch.map(async (symbol) => {
+                    try {
+                        const quote = await fetchJSON<QuoteSnapshotData>(
+                            `${FINNHUB_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&token=${token}`,
+                            300
+                        );
+
+                        return {
+                            symbol,
+                            price: quote.c || 0,
+                            changePercent: quote.dp || 0,
+                            high: quote.h || 0,
+                            low: quote.l || 0,
+                            open: quote.o || 0,
+                            previousClose: quote.pc || 0,
+                        } as StockSnapshot;
+                    } catch (e) {
+                        console.error(`Error fetching quote for ${symbol}:`, e);
+                        return null;
+                    }
+                })
+            );
+
+            batchResults.forEach((item) => {
+                if (item) snapshots.push(item);
+            });
+
+            if (i + batchSize < symbols.length) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+        }
+
+        return snapshots;
+    } catch (err) {
+        console.error('getStockSnapshots error:', err);
+        return [];
+    }
+}
+
 export const searchStocks = cache(async (query?: string): Promise<StockWithWatchlistStatus[]> => {
     try {
         const token = process.env.FINNHUB_API_KEY ?? NEXT_PUBLIC_FINNHUB_API_KEY;
@@ -112,21 +289,26 @@ export const searchStocks = cache(async (query?: string): Promise<StockWithWatch
         let results: FinnhubSearchResult[] = [];
 
         if (!trimmed) {
-            // Fetch top 10 popular symbols' profiles
+            // Fetch top 10 popular symbols' profiles sequentially to avoid rate limits
             const top = POPULAR_STOCK_SYMBOLS.slice(0, 10);
-            const profiles = await Promise.all(
-                top.map(async (sym) => {
-                    try {
-                        const url = `${FINNHUB_BASE_URL}/stock/profile2?symbol=${encodeURIComponent(sym)}&token=${token}`;
-                        // Revalidate every hour
-                        const profile = await fetchJSON<any>(url, 3600);
-                        return { sym, profile } as { sym: string; profile: any };
-                    } catch (e) {
+            const profiles: { sym: string; profile: any }[] = [];
+            
+            for (const sym of top) {
+                try {
+                    const url = `${FINNHUB_BASE_URL}/stock/profile2?symbol=${encodeURIComponent(sym)}&token=${token}`;
+                    // Revalidate every hour
+                    const profile = await fetchJSON<any>(url, 3600);
+                    profiles.push({ sym, profile });
+                    // Small delay between requests to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (e: any) {
+                    // Only log non-rate-limit errors
+                    if (!e?.message?.includes('429')) {
                         console.error('Error fetching profile2 for', sym, e);
-                        return { sym, profile: null } as { sym: string; profile: any };
                     }
-                })
-            );
+                    profiles.push({ sym, profile: null });
+                }
+            }
 
             results = profiles
                 .map(({ sym, profile }) => {
