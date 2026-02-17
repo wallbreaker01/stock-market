@@ -1,5 +1,7 @@
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useTransition } from "react";
+import { addToWatchlist, removeFromWatchlist } from "@/lib/actions/watchlist.action";
+import { toast } from "sonner";
 
 // Minimal WatchlistButton implementation to satisfy page requirements.
 // This component focuses on UI contract only. It toggles local state and
@@ -9,11 +11,17 @@ const WatchlistButton = ({
   symbol,
   company,
   isInWatchlist,
+  userId,
   showTrashIcon = false,
   type = "button",
   onWatchlistChange,
 }: WatchlistButtonProps) => {
   const [added, setAdded] = useState<boolean>(!!isInWatchlist);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setAdded(!!isInWatchlist);
+  }, [isInWatchlist]);
 
   const label = useMemo(() => {
     if (type === "icon") return added ? "" : "";
@@ -21,9 +29,25 @@ const WatchlistButton = ({
   }, [added, type]);
 
   const handleClick = () => {
-    const next = !added;
-    setAdded(next);
-    onWatchlistChange?.(symbol, next);
+    if (!userId) {
+      toast.error("Please sign in to manage your watchlist");
+      return;
+    }
+
+    startTransition(async () => {
+      const next = !added;
+      const result = next
+        ? await addToWatchlist(userId, symbol, company || symbol)
+        : await removeFromWatchlist(userId, symbol);
+
+      if (result.success) {
+        setAdded(next);
+        toast.success(result.message);
+        onWatchlistChange?.(symbol, next);
+      } else {
+        toast.error(result.message);
+      }
+    });
   };
 
   if (type === "icon") {
@@ -33,6 +57,7 @@ const WatchlistButton = ({
         aria-label={added ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
         className={`watchlist-icon-btn ${added ? "watchlist-icon-added" : ""}`}
         onClick={handleClick}
+        disabled={isPending}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -53,7 +78,11 @@ const WatchlistButton = ({
   }
 
   return (
-    <button className={`watchlist-btn ${added ? "watchlist-remove" : ""}`} onClick={handleClick}>
+    <button
+      className={`watchlist-btn ${added ? "watchlist-remove" : ""}`}
+      onClick={handleClick}
+      disabled={isPending}
+    >
       {showTrashIcon && added ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"

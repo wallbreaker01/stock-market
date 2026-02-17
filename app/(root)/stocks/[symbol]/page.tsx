@@ -8,10 +8,34 @@ import {
   SYMBOL_INFO_WIDGET_CONFIG,
   TECHNICAL_ANALYSIS_WIDGET_CONFIG,
 } from '@/lib/constants'
+import { auth } from '@/lib/better-auth/auth'
+import { headers } from 'next/headers'
+import { getWatchlistByUserId } from '@/lib/actions/watchlist.action'
+import { searchStocks } from '@/lib/actions/finnhub.action'
 
 const StockDetails = async ({ params }: StockDetailsPageProps) => {
   const { symbol } = await params
   const scriptUrl = 'https://s3.tradingview.com/external-embedding/embed-widget-'
+  const session = await auth.api.getSession({ headers: await headers() })
+  const userId = session?.user?.id
+
+  let isInWatchlist = false
+  let company = symbol
+
+  if (userId) {
+    const items = await getWatchlistByUserId(userId)
+    const matched = items.find((item) => item.symbol.toUpperCase() === symbol.toUpperCase())
+    if (matched) {
+      isInWatchlist = true
+      company = matched.company || symbol
+    }
+  }
+
+  if (!isInWatchlist) {
+    const searchResults = await searchStocks(symbol)
+    const match = searchResults.find((item) => item.symbol.toUpperCase() === symbol.toUpperCase())
+    company = match?.name || company
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-2">
@@ -39,7 +63,12 @@ const StockDetails = async ({ params }: StockDetailsPageProps) => {
         />
       </section>
       <section className="flex flex-col gap-8">
-        <WatchlistButton symbol={symbol} company={symbol} isInWatchlist={false} />
+        <WatchlistButton
+          symbol={symbol}
+          company={company}
+          isInWatchlist={isInWatchlist}
+          userId={userId}
+        />
         <TradingViewWidget
           title=""
           scriptUrl={`${scriptUrl}technical-analysis.js`}
