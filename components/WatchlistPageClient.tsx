@@ -22,6 +22,8 @@ export default function WatchlistPageClient({
     useEffect(() => {
         const fetchWatchlist = async () => {
             if (!userId) {
+                setWatchlistData([]);
+                setAlertSymbols([]);
                 setLoading(false);
                 return;
             }
